@@ -1,9 +1,8 @@
 from flask import Flask
-from flask_restful import Api, Resource, reqparse, fields, marshal_with, abort
+from flask_restful import Api, Resource, reqparse, fields, marshal, marshal_with, abort
 from flask_sqlalchemy import SQLAlchemy
 import WazeRouteCalculator
 from datetime import datetime
-import schedule
 import time
 import threading
 from pytictoc import TicToc
@@ -24,7 +23,7 @@ class ControlDatabaseModel(db.Model):
     INVALID = 3
 
     # num of samples for entry to be considered ready for display
-    READY_THRESHOLD = 500
+    READY_THRESHOLD = 1440
 
     # PyCharm code inspection issue:
     # (https://stackoverflow.com/questions/35242153/unresolved-attribute-column-in-class-sqlalchemy)
@@ -55,8 +54,8 @@ resource_fields = {
     "id": fields.Integer,
     "source": fields.String,
     "destination": fields.String,
-    "status": fields.Integer,
-    "num_of_measurements": fields.Integer,
+    "ETA": fields.Integer,
+    "time_of_collection": fields.DateTime,
 }
 
 
@@ -81,7 +80,7 @@ class MapServerInterface:
             for key, value in self.valid_routes_cache.copy().items():
                 #print(self.valid_routes_cache.items())
                 if self.valid_routes_cache[key] == 0:
-                    del self.valid_routes_cache[key]
+                    del self.valid_routes_cache[key] # TODO: add status change
                 else:
                     #t.tic()
                     source = key[0]
@@ -102,9 +101,9 @@ class MapServerInterface:
                     db.session.add(eta_measurement)
                     #t.toc('Section 5 took', restart=True)
                     #db.session.commit()
-                    print(eta_measurement)
-                    print(route)
-                    print("Num of active threads is {}".format(threading.activeCount()))
+                    #print(eta_measurement)
+                    #print(route)
+                    #print("Num of active threads is {}".format(threading.activeCount()))
 
             #t.tic()
             db.session.commit()
@@ -114,6 +113,7 @@ class MapServerInterface:
             time_to_sleep = 60 - (end_time - start_time)
             time.sleep(time_to_sleep)
 
+    # preparation for ThreadPool functionality
     """def collect_data_from_map_service(self, key):
         while self.valid_routes_cache[key]:
             start_time = time.time()
@@ -153,66 +153,24 @@ class MapServerInterface:
         return eta
 
 
-    def print_control_db_queries(self):
-        routes_in_ctrl_db = ControlDatabaseModel.query.all()
-        now = datetime.now()
-        current_time = now.strftime("%H:%M:%S")
-        print("Current Time =", current_time)
-        for route in routes_in_ctrl_db:
-            print("ID = {}".format(route.id), "|", "Source = {}".format(route.source), "|",
-                  "Destination = {}".format(route.destination), "|", "Status = {}".format(route.status), "|",
-                  "Num of measurements = {}".format(route.num_of_measurements))
-
-
-    def scheduling_func(self):
-        schedule.every(10).seconds.do(self.print_control_db_queries)
-        while True:
-            now = datetime.now()
-            if now.hour >= 8 and now.hour < 20:
-            #if now.minute >= 20 and now.minute < 21:
-                schedule.run_pending()
-
-
-
-
 class Route(Resource):
-    def __init__(self):
-        self.id_of_last_entry_in_control_db = self.get_id_of_last_entry()
-
-    def get_id_of_last_entry(self):
-        all_entries = ControlDatabaseModel.query.all()  # TODO: save curr last id to file
-        if len(all_entries) > 0:
-            id_of_last_entry = all_entries[-1].id
-            return id_of_last_entry
-        else:
-            return len(all_entries)
-
 
     def get(self, source, destination):
         lower_source = source.lower()
         lower_destination = destination.lower()
         result = ControlDatabaseModel.query.filter_by(source=lower_source, destination=lower_destination).first()
 
-
         if not result:
-            if self.is_valid_route(source, destination):
-                route = ControlDatabaseModel(source=lower_source, destination=lower_destination,
-                                             status=ControlDatabaseModel.NOT_READY,
-                                             num_of_measurements=0)
-                message = "The route was successfully added to DB. ETA data will be available at a later date" # TODO: change message?
-            else:
-                route = ControlDatabaseModel(source=lower_source, destination=lower_destination,
-                                             status=ControlDatabaseModel.INVALID,
-                                             num_of_measurements=0)
-                message = "The route does not exist. Please enter a valid route"
-
-            db.session.add(route)
-            db.session.commit()
-            return message, 201
-
+            message = "The route is not in the database. Please add the route"
+            return message
         elif result.status == ControlDatabaseModel.INVALID:
             message = "The route does not exist. Please enter a valid route"
-            return message, 201
+            return message
+        else: # TODO: add check if status is 'READY'
+            query = ETADatabaseModel.query.filter_by(source=lower_source, destination=lower_destination).all()
+            updated_query = marshal(query, resource_fields)
+            return updated_query
+
 
     def put(self, source, destination):
         lower_source = source.lower()
@@ -220,7 +178,6 @@ class Route(Resource):
         result = ControlDatabaseModel.query.filter_by(source=lower_source, destination=lower_destination).first()
         already_in_db_message = "The route was already added"
         if not result:
-            #curr_route_id = self.id_of_last_entry_in_control_db + 1
             if self.is_valid_route(source, destination):
                 route = ControlDatabaseModel(source=lower_source, destination=lower_destination,
                                              status=ControlDatabaseModel.NOT_READY,
@@ -231,10 +188,9 @@ class Route(Resource):
                                              status=ControlDatabaseModel.INVALID,
                                              num_of_measurements=0)
                 message = "The route does not exist. Please enter a valid route"
-            #self.id_of_last_entry_in_control_db += 1
             db.session.add(route)
             db.session.commit()
-            return message, 201
+            return message
         return already_in_db_message
 
 
@@ -253,14 +209,13 @@ api.add_resource(Route, "/route/<string:source>/<string:destination>")
 
 if __name__ == '__main__':
     server = MapServerInterface()
+    # preparation for ThreadPool functionality
     """with concurrent.futures.ThreadPoolExecutor() as executor:
         valid_routes_cache_list = list(server.valid_routes_cache)
         executor.map(server.collect_data_from_map_service, valid_routes_cache_list)"""
 
     thread = threading.Thread(target=server.collect_data_from_map_service)
     thread.start()
-    #print(threading.activeCount())
-    #server.collect_data_from_map_service()
     app.run(debug=False)
 
 
