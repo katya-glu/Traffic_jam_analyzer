@@ -1,5 +1,5 @@
 from flask import Flask
-from flask_restful import Api, Resource, reqparse, fields, marshal, marshal_with, abort
+from flask_restful import Api, Resource, fields, marshal
 from flask_sqlalchemy import SQLAlchemy
 import WazeRouteCalculator
 from datetime import datetime
@@ -44,11 +44,7 @@ class ETADatabaseModel(db.Model):
     ETA = db.Column(db.Integer, nullable=False)
     time_of_collection = db.Column(db.DateTime, nullable=False)
 
-
-"""video_update_args = reqparse.RequestParser()
-video_update_args.add_argument("name", type=str, help="Name of the video required")
-video_update_args.add_argument("views", type=int, help="Views of the video required")
-video_update_args.add_argument("likes", type=int, help="Likes of the video required")"""
+#db.create_all()       # use this line after deleting database.db
 
 resource_fields = {
     "id": fields.Integer,
@@ -60,9 +56,12 @@ resource_fields = {
 
 
 class MapServerInterface:
-    def __init__(self):
+    def __init__(self, debug_mode_data_collection):
         self.valid_routes_cache = self.create_valid_routes_cache_for_sample_gathering()
-        #print(self.valid_routes_cache)
+        if type(debug_mode_data_collection) is bool:
+            self.debug_mode_data_collection = debug_mode_data_collection
+        else:
+            self.debug_mode_data_collection = True              # default is to collect data
 
     def create_valid_routes_cache_for_sample_gathering(self):
         routes_cache = {}
@@ -74,6 +73,7 @@ class MapServerInterface:
         return routes_cache
 
     def collect_data_from_map_service(self):
+        print('Data collection has started')
         t = TicToc()
         while len(self.valid_routes_cache) > 0:
             start_time = time.time()
@@ -105,9 +105,9 @@ class MapServerInterface:
                     #print(route)
                     #print("Num of active threads is {}".format(threading.activeCount()))
 
-            #t.tic()
+            t.tic()
             db.session.commit()
-            #t.toc('Section 6 took')
+            t.toc('Commit took')
 
             end_time = time.time()
             time_to_sleep = 60 - (end_time - start_time)
@@ -208,14 +208,15 @@ class Route(Resource):
 api.add_resource(Route, "/route/<string:source>/<string:destination>")
 
 if __name__ == '__main__':
-    server = MapServerInterface()
+    server = MapServerInterface(True)
     # preparation for ThreadPool functionality
     """with concurrent.futures.ThreadPoolExecutor() as executor:
         valid_routes_cache_list = list(server.valid_routes_cache)
         executor.map(server.collect_data_from_map_service, valid_routes_cache_list)"""
 
-    thread = threading.Thread(target=server.collect_data_from_map_service)
-    thread.start()
+    if server.debug_mode_data_collection:
+        thread = threading.Thread(target=server.collect_data_from_map_service)
+        thread.start()
     app.run(debug=False)
 
 
