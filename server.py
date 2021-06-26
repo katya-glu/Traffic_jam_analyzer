@@ -63,6 +63,7 @@ class MapServerInterface:
         else:
             self.debug_mode_data_collection = True              # default is to collect data
 
+
     def create_valid_routes_cache_for_sample_gathering(self):
         routes_cache = {}
         routes_in_ctrl_db = ControlDatabaseModel.query.all()
@@ -71,6 +72,15 @@ class MapServerInterface:
                 num_of_remaining_measurements = ControlDatabaseModel.READY_THRESHOLD - route.num_of_measurements
                 routes_cache[(route.source, route.destination)] = num_of_remaining_measurements
         return routes_cache
+
+
+    # for unit testing of routes addition to DB (if not deleted, a route can be added only once)
+    def delete_route_from_ControlDB(self, source, destination):
+        lower_source = source.lower()
+        lower_destination = destination.lower()
+        ControlDatabaseModel.query.filter_by(source=lower_source, destination=lower_destination).delete()
+        db.session.commit()
+
 
     def collect_data_from_map_service(self):
         print('Data collection has started')
@@ -100,18 +110,16 @@ class MapServerInterface:
 
                     db.session.add(eta_measurement)
                     #t.toc('Section 5 took', restart=True)
-                    #db.session.commit()
-                    #print(eta_measurement)
-                    #print(route)
                     #print("Num of active threads is {}".format(threading.activeCount()))
 
-            t.tic()
+            #t.tic()
             db.session.commit()
-            t.toc('Commit took')
+            #t.toc('Commit took')
 
             end_time = time.time()
             time_to_sleep = 60 - (end_time - start_time)
             time.sleep(time_to_sleep)
+
 
     # preparation for ThreadPool functionality
     """def collect_data_from_map_service(self, key):
@@ -169,7 +177,8 @@ class Route(Resource):
         else: # TODO: add check if status is 'READY'
             query = ETADatabaseModel.query.filter_by(source=lower_source, destination=lower_destination).all()
             updated_query = marshal(query, resource_fields)
-            return updated_query
+            eta_at_time_of_request = self.get_route_info(source, destination)
+            return [updated_query, eta_at_time_of_request]
 
 
     def put(self, source, destination):
@@ -203,6 +212,16 @@ class Route(Resource):
             return True
         except WazeRouteCalculator.WRCError:
             return False
+
+
+    def get_route_info(self, source, destination):
+        from_address = source
+        to_address = destination
+        region = 'IL'
+        route = WazeRouteCalculator.WazeRouteCalculator(from_address, to_address, region)
+        route_info = route.calc_route_info()
+        eta = route_info[0]
+        return eta
 
 
 api.add_resource(Route, "/route/<string:source>/<string:destination>")
