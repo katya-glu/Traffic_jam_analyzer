@@ -33,7 +33,6 @@ class Client:
         self.destination = 'rosh haayin, amal 10'   # temp default val
         self.base_address = "http://127.0.0.1:5000/"
         self.opening_window = self.create_opening_window()
-        #self.sorted_df = pd.DataFrame()
         self.route_data_from_db = {}
         self.eta_and_time_index_now = []
 
@@ -60,17 +59,20 @@ class Client:
         separator = ttk.Separator(self.opening_window, orient='vertical')
         separator.grid(row=0, column=2, rowspan=60, sticky="ns")
 
-        # UI - define sliders sliders
+        # UI - define sliders
         smoothing_factor = Scale(self.opening_window, from_=1, to=100, length=150, orient=HORIZONTAL)
         max_prominence_val_factor = Scale(self.opening_window, from_=0.5, to=5.0, length=150, resolution=0.1, orient=HORIZONTAL)
         min_prominence_val_factor = Scale(self.opening_window, from_=0.5, to=5.0, length=150, resolution=0.1, orient=HORIZONTAL)
-        desired_driving_time = Scale(self.opening_window, from_=30, to=60, length=150,
-                                     orient=HORIZONTAL)
+        desired_driving_time = Scale(self.opening_window, from_=30, to=60, length=150, orient=HORIZONTAL)
 
-        # UI - check box TODO: add dark theme functionality
+        # UI - waiting time message
+        text_for_waiting_time_label = "tmp" # TODO: find a better way
+        waiting_time_label = Label(self.opening_window, text=text_for_waiting_time_label, font=('Helvatical bold', 16))
+
+        """# UI - check box TODO: add dark theme functionality
         dark_mode_var = IntVar()
         dark_mode_check_box = Checkbutton(self.opening_window, text="Dark mode (TBD)", variable=dark_mode_var)
-        dark_mode_check_box.grid(row=59, column=0)
+        dark_mode_check_box.grid(row=59, column=0)"""
 
         # UI - button functions
         def send_add_route_request():
@@ -98,14 +100,14 @@ class Client:
             else:
                 response = requests.get(self.base_address + "route/{}/{}".format(self.source, self.destination))
                 response_json = response.json()
-                # check if a route that doesn't exist in the DB or is invalid
+                # check if a route doesn't exist in DB or is invalid
                 if len(response_json[0]) < 200:
                     display_route_message_window = Tk()
                     response_message = Label(display_route_message_window, text='{}'.format(response_json))
                     response_message.pack()
                     ok_button = Button(display_route_message_window, text='OK', command=display_route_message_window.destroy)
                     ok_button.pack()
-                else:
+                else:                   # route exists in DB and is ready for display
                     self.route_data_from_db = response_json[0]
                     eta_at_time_of_request = response_json[1]
                     datetime_at_time_of_request = datetime.now()
@@ -114,7 +116,7 @@ class Client:
                     time_of_day_index = self.time_to_time_of_day_index(hour_at_time_of_request, minute_at_time_of_request)
                     self.eta_and_time_index_now = [time_of_day_index, eta_at_time_of_request]
                     sorted_df = self.data_preparation_pandas()
-                    self.do_spline_interpolation_constant_intervals(sorted_df)  # spline calculation
+                    self.do_spline_interpolation_constant_intervals(sorted_df)  # spline calculation (done once)
                     self.plot_eta_from_pandas_tkinter_embedded(sorted_df, self.eta_and_time_index_now)
 
                     start_point = sorted_df.loc[sorted_df['ETA'].idxmin()]
@@ -123,6 +125,7 @@ class Client:
                     end_point_eta = end_point['ETA']
                     end_point_start_point_diff = end_point_eta - start_point_eta
                     offset_for_desired_driving_time_set_point = 0.25 * end_point_start_point_diff
+                    self.desired_driving_time = start_point_eta + offset_for_desired_driving_time_set_point
 
                     desired_driving_time.config(from_=start_point_eta, to=end_point_eta)
 
@@ -136,7 +139,7 @@ class Client:
                     min_prominence_val_factor.grid(row=slider_row+2, column=1)
                     min_prominence_val_factor.set(1.0)
                     desired_driving_time.grid(row=slider_row+3, column=1)
-                    desired_driving_time.set(start_point_eta + offset_for_desired_driving_time_set_point)
+                    desired_driving_time.set(self.desired_driving_time)
 
 
                     # UI - slider labels
@@ -149,9 +152,29 @@ class Client:
                     desired_driving_time_description = Label(self.opening_window, text="Desired driving time")
                     desired_driving_time_description.grid(row=slider_row+3, column=0, sticky='w')
 
+
                     # UI - button
                     update_plot_button = Button(self.opening_window, text='Update plot', command=get_values_for_updated_plot)
                     update_plot_button.grid(row=slider_row+4, column=1)
+
+                    # finding first time that is <= threshold
+                    time_of_day_index_now = self.eta_and_time_index_now[0]
+                    eta_now = self.eta_and_time_index_now[1]
+                    text_for_waiting_time_label = ""
+                    if eta_now <= self.desired_driving_time:
+                        text_for_waiting_time_label = "Leave now"
+                    else:
+                        for idx, row in sorted_df[sorted_df['time_of_day_index'] > time_of_day_index_now].iterrows():
+                            if sorted_df.iloc[idx, 10] <= self.desired_driving_time:  # 10 - smoothed ETA
+                                # print(sorted_df.iloc[idx, 4])
+                                datetime_at_threshold_str = sorted_df.iloc[idx, 5][17:22]
+                                text_for_waiting_time_label = "Leave at {}".format(datetime_at_threshold_str)
+
+                    # UI - waiting time message
+                    waiting_time_label.grid_forget()
+                    waiting_time_label.config(text=text_for_waiting_time_label) # TODO: split str to 2 cols
+                    waiting_time_label.grid(row=slider_row+5, column=0)
+
 
         def get_values_for_updated_plot():
             self.rolling_val = smoothing_factor.get()
@@ -160,6 +183,26 @@ class Client:
             self.desired_driving_time = desired_driving_time.get()
             sorted_df = self.data_preparation_pandas()
             self.plot_eta_from_pandas_tkinter_embedded(sorted_df, self.eta_and_time_index_now)
+
+            # finding first time that is <= threshold
+            # TODO: put in a separate func
+            time_of_day_index_now = self.eta_and_time_index_now[0]
+            eta_now = self.eta_and_time_index_now[1]
+            text_for_waiting_time_label = ""
+            if eta_now <= self.desired_driving_time:
+                text_for_waiting_time_label = "Leave now"
+            else:
+                for idx, row in sorted_df[sorted_df['time_of_day_index'] > time_of_day_index_now].iterrows():
+                    if sorted_df.iloc[idx, 10] <= self.desired_driving_time:        # 10 - smoothed ETA
+                        datetime_at_threshold_str = sorted_df.iloc[idx, 5][17:22]
+                        text_for_waiting_time_label = "Leave at {}".format(datetime_at_threshold_str)
+                        break
+
+
+            # UI - waiting time message
+            waiting_time_label.grid_forget()
+            waiting_time_label.config(text=text_for_waiting_time_label) # TODO: split str to 2 cols
+            waiting_time_label.grid(row=20, column=0)
 
 
         # UI - Buttons

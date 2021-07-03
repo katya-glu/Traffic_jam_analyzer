@@ -65,6 +65,7 @@ class MapServerInterface:
 
 
     def create_valid_routes_cache_for_sample_gathering(self):
+        # TODO: use query on DB to filter items, not loop through all items
         routes_cache = {}
         routes_in_ctrl_db = ControlDatabaseModel.query.all()
         for route in routes_in_ctrl_db:
@@ -81,13 +82,14 @@ class MapServerInterface:
         ControlDatabaseModel.query.filter_by(source=lower_source, destination=lower_destination).delete()
         db.session.commit()
 
-
+    # func collects ETA data for routes in self.valid_routes_cache
     def collect_data_from_map_service(self):
+        # TODO: check periodically if need to start collecting data, in case new route is added
         print('Data collection has started')
         t = TicToc()
         while len(self.valid_routes_cache) > 0:
             start_time = time.time()
-            for key, value in self.valid_routes_cache.copy().items():
+            for key, value in self.valid_routes_cache.copy().items():   # TODO: find a way to not create a copy of cache every time
                 #print(self.valid_routes_cache.items())
                 if self.valid_routes_cache[key] == 0:
                     del self.valid_routes_cache[key] # TODO: add status change
@@ -163,6 +165,7 @@ class MapServerInterface:
 
 class Route(Resource):
 
+    # func gets ETA data for display from DB
     def get(self, source, destination):
         lower_source = source.lower()
         lower_destination = destination.lower()
@@ -174,25 +177,25 @@ class Route(Resource):
         elif result.status == ControlDatabaseModel.INVALID:
             message = "The route does not exist. Please enter a valid route"
             return message
-        else: # TODO: add check if status is 'READY'
+        else: # TODO: add check if status is 'READY', add message if status is not ready
             query = ETADatabaseModel.query.filter_by(source=lower_source, destination=lower_destination).all()
             updated_query = marshal(query, resource_fields)
             eta_at_time_of_request = self.get_route_info(source, destination)
             return [updated_query, eta_at_time_of_request]
 
-
+    # func receives a new route from client, adds to ControlDB
     def put(self, source, destination):
         lower_source = source.lower()
         lower_destination = destination.lower()
         result = ControlDatabaseModel.query.filter_by(source=lower_source, destination=lower_destination).first()
         already_in_db_message = "The route was already added"
-        if not result:
+        if not result:          # route does not exist in ControlDB
             if self.is_valid_route(source, destination):
                 route = ControlDatabaseModel(source=lower_source, destination=lower_destination,
                                              status=ControlDatabaseModel.NOT_READY,
                                              num_of_measurements=0)
                 message = "The route was successfully added to DB"
-            else:
+            else:               # route is invalid
                 route = ControlDatabaseModel(source=lower_source, destination=lower_destination,
                                              status=ControlDatabaseModel.INVALID,
                                              num_of_measurements=0)
