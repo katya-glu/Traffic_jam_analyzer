@@ -169,6 +169,7 @@ class Client:
                                 # print(sorted_df.iloc[idx, 4])
                                 datetime_at_threshold_str = sorted_df.iloc[idx, 5][17:22]
                                 text_for_waiting_time_label = "Leave at {}".format(datetime_at_threshold_str)
+                                break
 
                     # UI - waiting time message
                     waiting_time_label.grid_forget()

@@ -111,6 +111,7 @@ class MapServerInterface:
                     route.num_of_measurements += 1
 
                     db.session.add(eta_measurement)
+                    print("({} -> {}) time_of_collection: {}".format(source, destination, str(time_of_collection)))
                     #t.toc('Section 5 took', restart=True)
                     #print("Num of active threads is {}".format(threading.activeCount()))
 
