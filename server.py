@@ -54,10 +54,13 @@ resource_fields = {
     "time_of_collection": fields.DateTime,
 }
 
+# global variable used so Route can write to it and MapServerInterface can read from it
+valid_routes_cache = {}         # TODO: replace global variable
 
 class MapServerInterface:
     def __init__(self, debug_mode_data_collection):
-        self.valid_routes_cache = self.create_valid_routes_cache_for_sample_gathering()
+        global valid_routes_cache
+        valid_routes_cache = self.create_valid_routes_cache_for_sample_gathering()
         if type(debug_mode_data_collection) is bool:
             self.debug_mode_data_collection = debug_mode_data_collection
         else:
@@ -87,71 +90,42 @@ class MapServerInterface:
         # TODO: check periodically if need to start collecting data, in case new route is added
         print('Data collection has started')
         t = TicToc()
-        while len(self.valid_routes_cache) > 0:
+        while True:
             start_time = time.time()
-            for key, value in self.valid_routes_cache.copy().items():   # TODO: find a way to not create a copy of cache every time
-                #print(self.valid_routes_cache.items())
-                if self.valid_routes_cache[key] == 0:
-                    del self.valid_routes_cache[key] # TODO: add status change
-                else:
-                    #t.tic()
-                    source = key[0]
-                    destination = key[1]
-                    #t.tic()
-                    ETA = self.get_route_info(source, destination)
-                    #t.toc('Section 1 took', restart=True)
-                    time_of_collection = datetime.now()
-                    #t.toc('Section 2 took', restart=True)
-                    eta_measurement = ETADatabaseModel(source=source, destination=destination, ETA=ETA,
-                                                       time_of_collection=time_of_collection)
-                    #t.toc('Section 3 took', restart=True)
-                    self.valid_routes_cache[key] -= 1
-                    route = ControlDatabaseModel.query.filter_by(source=source, destination=destination).first()
-                    #t.toc('Section 4 took', restart=True)
-                    route.num_of_measurements += 1
+            if len(valid_routes_cache) > 0:
+                for key, value in valid_routes_cache.copy().items():   # TODO: find a way to not create a copy of cache every time
+                    #print(self.valid_routes_cache.items())
+                    if valid_routes_cache[key] == 0:
+                        del valid_routes_cache[key] # TODO: add status change
+                    else:
+                        #t.tic()
+                        source = key[0]
+                        destination = key[1]
+                        #t.tic()
+                        ETA = self.get_route_info(source, destination)
+                        #t.toc('Section 1 took', restart=True)
+                        time_of_collection = datetime.now()
+                        #t.toc('Section 2 took', restart=True)
+                        eta_measurement = ETADatabaseModel(source=source, destination=destination, ETA=ETA,
+                                                           time_of_collection=time_of_collection)
+                        #t.toc('Section 3 took', restart=True)
+                        valid_routes_cache[key] -= 1
+                        route = ControlDatabaseModel.query.filter_by(source=source, destination=destination).first()
+                        #t.toc('Section 4 took', restart=True)
+                        route.num_of_measurements += 1
 
-                    db.session.add(eta_measurement)
-                    print("({} -> {}) time_of_collection: {}".format(source, destination, str(time_of_collection)))
-                    #t.toc('Section 5 took', restart=True)
-                    #print("Num of active threads is {}".format(threading.activeCount()))
+                        db.session.add(eta_measurement)
+                        print("({} -> {}) time_of_collection: {}".format(source, destination, str(time_of_collection)))
+                        #t.toc('Section 5 took', restart=True)
+                        #print("Num of active threads is {}".format(threading.activeCount()))
 
-            #t.tic()
-            db.session.commit()
-            #t.toc('Commit took')
+                #t.tic()
+                db.session.commit()
+                #t.toc('Commit took')
 
             end_time = time.time()
             time_to_sleep = 60 - (end_time - start_time)
             time.sleep(time_to_sleep)
-
-
-    # preparation for ThreadPool functionality
-    """def collect_data_from_map_service(self, key):
-        while self.valid_routes_cache[key]:
-            start_time = time.time()
-            #for key, value in self.valid_routes_cache.copy().items():
-            if self.valid_routes_cache[key] == 0:
-                del self.valid_routes_cache[key]
-            else:
-                source = key[0]
-                destination = key[1]
-                ETA = self.get_route_info(source, destination)
-                time_of_collection = datetime.now()
-                eta_measurement = ETADatabaseModel(source=source, destination=destination, ETA=ETA,
-                                                   time_of_collection=time_of_collection)
-                self.valid_routes_cache[key] -= 1
-                route = ControlDatabaseModel.query.filter_by(source=source, destination=destination).first()
-                route.num_of_measurements += 1
-
-                db.session.add(eta_measurement)
-                print(eta_measurement)
-                print(route)
-                print("Num of active threads is {}".format(threading.activeCount()))
-
-            db.session.commit()
-
-            end_time = time.time()
-            time_to_sleep = 60 - (end_time - start_time)
-            time.sleep(time_to_sleep)"""
 
 
     def get_route_info(self, source, destination):
@@ -196,6 +170,10 @@ class Route(Resource):
                                              status=ControlDatabaseModel.NOT_READY,
                                              num_of_measurements=0)
                 message = "The route was successfully added to DB"
+                # adding new route to valid_routes_cache (start collecting data immediately, no restart required)
+                global valid_routes_cache
+                valid_routes_cache[(route.source, route.destination)] = ControlDatabaseModel.READY_THRESHOLD
+                print(valid_routes_cache)
             else:               # route is invalid
                 route = ControlDatabaseModel(source=lower_source, destination=lower_destination,
                                              status=ControlDatabaseModel.INVALID,
@@ -232,10 +210,7 @@ api.add_resource(Route, "/route/<string:source>/<string:destination>")
 
 if __name__ == '__main__':
     server = MapServerInterface(True)
-    # preparation for ThreadPool functionality
-    """with concurrent.futures.ThreadPoolExecutor() as executor:
-        valid_routes_cache_list = list(server.valid_routes_cache)
-        executor.map(server.collect_data_from_map_service, valid_routes_cache_list)"""
+
 
     if server.debug_mode_data_collection:
         thread = threading.Thread(target=server.collect_data_from_map_service)
