@@ -158,6 +158,7 @@ class Client:
                     update_plot_button.grid(row=slider_row+4, column=1)
 
                     # finding first time that is <= threshold
+                    # TODO: put in a separate func
                     time_of_day_index_now = self.eta_and_time_index_now[0]
                     eta_now = self.eta_and_time_index_now[1]
                     text_for_waiting_time_label = ""
@@ -166,7 +167,6 @@ class Client:
                     else:
                         for idx, row in sorted_df[sorted_df['time_of_day_index'] > time_of_day_index_now].iterrows():
                             if sorted_df.iloc[idx, 10] <= self.desired_driving_time:  # 10 - smoothed ETA
-                                # print(sorted_df.iloc[idx, 4])
                                 datetime_at_threshold_str = sorted_df.iloc[idx, 5][17:22]
                                 text_for_waiting_time_label = "Leave at {}".format(datetime_at_threshold_str)
                                 break
@@ -334,7 +334,7 @@ class Client:
         plt.plot(time_index_now, eta_now, 'om', label='eta now')
         plt.scatter(self.peak_pos, self.peak_height, marker='X', c='r', label='local maxima')
         plt.scatter(self.min_pos, self.min_height, marker='X', c='g', label='local minima')
-        plt.legend(['data', 'cubic spline', 'ETA now', 'local maxima', 'local minima'], scatterpoints=1, loc='upper left')
+        plt.legend(['data', 'cubic spline', 'Travel time now', 'local maxima', 'local minima'], scatterpoints=1, loc='upper left')
         if self.desired_driving_time == 0:
             start_point = df.loc[df['ETA'].idxmin()]
             start_point_eta = start_point['ETA']
@@ -352,10 +352,9 @@ class Client:
         chart.get_tk_widget().grid(row=0, column=3, rowspan=60)
         plt.xlim([0, 24])
         plt.locator_params(axis="x", nbins=24)
-        plt.title('ETA vs. time of day')
+        plt.title('Travel time vs. time of day')
         plt.xlabel('Time of day')
-        plt.ylabel('ETA (min)')
-        #plt.show()
+        plt.ylabel('Travel time (min)')
 
 
 smoothing_val_default = 20

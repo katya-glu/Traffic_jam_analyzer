@@ -6,7 +6,6 @@ from datetime import datetime
 import time
 import threading
 from pytictoc import TicToc
-import concurrent.futures
 
 app = Flask(__name__)
 api = Api(app)
@@ -19,8 +18,8 @@ class ControlDatabaseModel(db.Model):
 
     # status enumerators
     NOT_READY = 0
-    READY = 2
-    INVALID = 3
+    READY = 1
+    INVALID = 2
 
     # num of samples for entry to be considered ready for display
     READY_THRESHOLD = 1440
@@ -87,16 +86,18 @@ class MapServerInterface:
 
     # func collects ETA data for routes in self.valid_routes_cache
     def collect_data_from_map_service(self):
-        # TODO: check periodically if need to start collecting data, in case new route is added
         print('Data collection has started')
         t = TicToc()
         while True:
             start_time = time.time()
             if len(valid_routes_cache) > 0:
                 for key, value in valid_routes_cache.copy().items():   # TODO: find a way to not create a copy of cache every time
-                    #print(self.valid_routes_cache.items())
                     if valid_routes_cache[key] == 0:
-                        del valid_routes_cache[key] # TODO: add status change
+                        del valid_routes_cache[key]
+                        source = key[0]
+                        destination = key[1]
+                        route = ControlDatabaseModel.query.filter_by(source=source, destination=destination).first()
+                        route.status = ControlDatabaseModel.READY
                     else:
                         #t.tic()
                         source = key[0]
@@ -117,7 +118,6 @@ class MapServerInterface:
                         db.session.add(eta_measurement)
                         print("({} -> {}) time_of_collection: {}".format(source, destination, str(time_of_collection)))
                         #t.toc('Section 5 took', restart=True)
-                        #print("Num of active threads is {}".format(threading.activeCount()))
 
                 #t.tic()
                 db.session.commit()
@@ -150,20 +150,29 @@ class Route(Resource):
             message = "The route is not in the database. Please add the route"
             return message
         elif result.status == ControlDatabaseModel.INVALID:
-            message = "The route does not exist. Please enter a valid route"
+            message = "Invalid route. Please enter a valid route"
             return message
-        else: # TODO: add check if status is 'READY', add message if status is not ready
-            query = ETADatabaseModel.query.filter_by(source=lower_source, destination=lower_destination).all()
-            updated_query = marshal(query, resource_fields)
-            eta_at_time_of_request = self.get_route_info(source, destination)
-            return [updated_query, eta_at_time_of_request]
+        else:
+            if result.status == ControlDatabaseModel.NOT_READY:
+                time_left_to_readiness = result.READY_THRESHOLD - result.num_of_measurements
+                time_left_to_readiness = time_left_to_readiness / 60
+                message = "The route is not ready for display yet. Try again in {}".format(time_left_to_readiness)
+                return message
+            else:
+                query = ETADatabaseModel.query.filter_by(source=lower_source, destination=lower_destination).all()
+                updated_query = marshal(query, resource_fields)
+                eta_at_time_of_request = self.get_route_info(source, destination)
+                return [updated_query, eta_at_time_of_request]
 
     # func receives a new route from client, adds to ControlDB
     def put(self, source, destination):
         lower_source = source.lower()
         lower_destination = destination.lower()
         result = ControlDatabaseModel.query.filter_by(source=lower_source, destination=lower_destination).first()
-        already_in_db_message = "The route was already added"
+        if result.status == ControlDatabaseModel.INVALID:
+            already_in_db_message = "Invalid route, was previously searched. Please check your spelling"
+        else:
+            already_in_db_message = "The route was already added"
         if not result:          # route does not exist in ControlDB
             if self.is_valid_route(source, destination):
                 route = ControlDatabaseModel(source=lower_source, destination=lower_destination,
