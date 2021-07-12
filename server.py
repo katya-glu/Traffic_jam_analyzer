@@ -169,7 +169,7 @@ class Route(Resource):
         lower_source = source.lower()
         lower_destination = destination.lower()
         result = ControlDatabaseModel.query.filter_by(source=lower_source, destination=lower_destination).first()
-        if result.status == ControlDatabaseModel.INVALID:
+        if result and result.status == ControlDatabaseModel.INVALID:
             already_in_db_message = "Invalid route, was previously searched. Please check your spelling"
         else:
             already_in_db_message = "The route was already added"
