@@ -1,5 +1,7 @@
 # Traffic_jam_analyzer
 
+At the moment the selected region for search is Israel.
+
 Routes in ControlDB that can be tested for display:
     1. rosh haayin, amal 10/tel aviv, j.l. gordon 61
     2. tel aviv, j.l. gordon 61/rosh haayin, amal 10

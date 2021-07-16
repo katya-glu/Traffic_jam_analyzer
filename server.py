@@ -10,12 +10,14 @@ from pytictoc import TicToc
 app = Flask(__name__)
 api = Api(app)
 app.config['SQLALCHEMY_DATABASE_URI'] = "sqlite:///database.db"
+# Flask-SQLAlchemy has its own event notification system that gets layered on top of SQLAlchemy.
+# To do this, it tracks modifications to the SQLAlchemy session. This takes extra resources, so the option
+# SQLALCHEMY_TRACK_MODIFICATIONS allows you to disable the modification tracking system.
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app, session_options={"autoflush": False})
 
 
 class ControlDatabaseModel(db.Model):
-
     # status enumerators
     NOT_READY = 0
     READY = 1
@@ -34,7 +36,6 @@ class ControlDatabaseModel(db.Model):
 
 
 class ETADatabaseModel(db.Model):
-
     # PyCharm code inspection issue:
     # (https://stackoverflow.com/questions/35242153/unresolved-attribute-column-in-class-sqlalchemy)
     id = db.Column(db.Integer, primary_key=True)
@@ -43,7 +44,8 @@ class ETADatabaseModel(db.Model):
     ETA = db.Column(db.Integer, nullable=False)
     time_of_collection = db.Column(db.DateTime, nullable=False)
 
-#db.create_all()       # use this line after deleting database.db
+# use the next line after deleting database.db
+#db.create_all()       # TODO: add code to check whether db exists, if not - create db
 
 resource_fields = {
     "id": fields.Integer,
@@ -79,27 +81,26 @@ class MapServerInterface:
 
     # for unit testing of routes addition to DB (if not deleted, a route can be added only once)
     def delete_route_from_ControlDB(self, source, destination):
-        lower_source = source.lower()
-        lower_destination = destination.lower()
-        ControlDatabaseModel.query.filter_by(source=lower_source, destination=lower_destination).delete()
+        source = source.lower()
+        destination = destination.lower()
+        ControlDatabaseModel.query.filter_by(source=source, destination=destination).delete()
         db.session.commit()
 
     # func collects ETA data for routes in self.valid_routes_cache
     def collect_data_from_map_service(self):
         print('Data collection has started')
         t = TicToc()
-        while True:
+        while True:                     # func needs to run all the time, in case at startup the valid_routes_cache is empty
             start_time = time.time()
             if len(valid_routes_cache) > 0:
                 for key, value in valid_routes_cache.copy().items():   # TODO: find a way to not create a copy of cache every time
-                    if valid_routes_cache[key] == 0:
+                    if valid_routes_cache[key] == 0:        # required #meas. were collected
                         del valid_routes_cache[key]
                         source = key[0]
                         destination = key[1]
                         route = ControlDatabaseModel.query.filter_by(source=source, destination=destination).first()
                         route.status = ControlDatabaseModel.READY
                     else:
-                        #t.tic()
                         source = key[0]
                         destination = key[1]
                         #t.tic()
@@ -139,12 +140,11 @@ class MapServerInterface:
 
 
 class Route(Resource):
-
     # func gets ETA data for display from DB
     def get(self, source, destination):
-        lower_source = source.lower()
-        lower_destination = destination.lower()
-        result = ControlDatabaseModel.query.filter_by(source=lower_source, destination=lower_destination).first()
+        source = source.lower()
+        destination = destination.lower()
+        result = ControlDatabaseModel.query.filter_by(source=source, destination=destination).first()
 
         if not result:
             message = "The route is not in the database. Please add the route"
@@ -159,35 +159,35 @@ class Route(Resource):
                 message = "The route is not ready for display yet. Try again in {}".format(time_left_to_readiness)
                 return message
             else:
-                query = ETADatabaseModel.query.filter_by(source=lower_source, destination=lower_destination).all()
+                query = ETADatabaseModel.query.filter_by(source=source, destination=destination).all()
                 updated_query = marshal(query, resource_fields)
                 eta_at_time_of_request = self.get_route_info(source, destination)
                 return [updated_query, eta_at_time_of_request]
 
     # func receives a new route from client, adds to ControlDB
     def put(self, source, destination):
-        lower_source = source.lower()
-        lower_destination = destination.lower()
-        result = ControlDatabaseModel.query.filter_by(source=lower_source, destination=lower_destination).first()
+        source = source.lower()
+        destination = destination.lower()
+        result = ControlDatabaseModel.query.filter_by(source=source, destination=destination).first()
         if result and result.status == ControlDatabaseModel.INVALID:
             already_in_db_message = "Invalid route, was previously searched. Please check your spelling"
         else:
             already_in_db_message = "The route was already added"
         if not result:          # route does not exist in ControlDB
             if self.is_valid_route(source, destination):
-                route = ControlDatabaseModel(source=lower_source, destination=lower_destination,
+                route = ControlDatabaseModel(source=source, destination=destination,
                                              status=ControlDatabaseModel.NOT_READY,
                                              num_of_measurements=0)
                 message = "The route was successfully added to DB"
                 # adding new route to valid_routes_cache (start collecting data immediately, no restart required)
                 global valid_routes_cache
                 valid_routes_cache[(route.source, route.destination)] = ControlDatabaseModel.READY_THRESHOLD
-                print(valid_routes_cache)
             else:               # route is invalid
-                route = ControlDatabaseModel(source=lower_source, destination=lower_destination,
+                route = ControlDatabaseModel(source=source, destination=destination,
                                              status=ControlDatabaseModel.INVALID,
                                              num_of_measurements=0)
                 message = "The route does not exist. Please enter a valid route"
+
             db.session.add(route)
             db.session.commit()
             return message
@@ -217,10 +217,9 @@ class Route(Resource):
 
 api.add_resource(Route, "/route/<string:source>/<string:destination>")
 
+
 if __name__ == '__main__':
     server = MapServerInterface(True)
-
-
     if server.debug_mode_data_collection:
         thread = threading.Thread(target=server.collect_data_from_map_service)
         thread.start()
