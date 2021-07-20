@@ -150,13 +150,15 @@ class Route(Resource):
             message = "The route is not in the database. Please add the route"
             return message
         elif result.status == ControlDatabaseModel.INVALID:
-            message = "Invalid route. Please enter a valid route"
+            message = "Invalid route. Please check your spelling"
             return message
         else:
             if result.status == ControlDatabaseModel.NOT_READY:
                 time_left_to_readiness = result.READY_THRESHOLD - result.num_of_measurements
-                time_left_to_readiness = time_left_to_readiness / 60
-                message = "The route is not ready for display yet. Try again in {}".format(time_left_to_readiness)
+                time_left_to_readiness_hour = int(time_left_to_readiness / 60)
+                time_left_to_readiness_minute = time_left_to_readiness % 60
+                message = "The route is not ready for display yet. Time left to readiness: {}h and {:02d}m".format(time_left_to_readiness_hour,
+                                                                                              time_left_to_readiness_minute)
                 return message
             else:
                 query = ETADatabaseModel.query.filter_by(source=source, destination=destination).all()
